@@ -1,9 +1,20 @@
 "use client";
 
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { api, DatasetStats } from "../lib/api";
+import { useRequireAuth } from "../lib/auth";
 
-// Icons
+type UploadTask = {
+  id: string;
+  name: string;
+  size: number;
+  file: File;
+  status: "pending" | "uploading" | "uploaded" | "failed";
+  error?: string;
+};
+
 const UploadIconSmall = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -54,13 +65,93 @@ const AnnotatedCheckIcon = () => (
   </svg>
 );
 
+function randomId() {
+  return Math.random().toString(36).slice(2);
+}
+
 export default function UploadPage() {
-  const uploadingFiles = [
-    { name: "dataset_v2_001.jpg", status: "uploaded" },
-    { name: "dataset_v2_002.jpg", status: "uploaded" },
-    { name: "dataset_v2_003.png", status: "processing" },
-    { name: "dataset_v2_004.jpg", status: "pending" },
-  ];
+  const { loading: authLoading, user } = useRequireAuth();
+  const [tasks, setTasks] = useState<UploadTask[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [stats, setStats] = useState<DatasetStats | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const fetchStats = async () => {
+    try {
+      const s = await api.dataset.stats();
+      setStats(s);
+    } catch (e) {
+      console.error("Failed to load stats", e);
+    }
+  };
+
+  useEffect(() => {
+    if (user) fetchStats();
+  }, [user]);
+
+  const handleFiles = (files: FileList | File[]) => {
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const newTasks: UploadTask[] = arr.map((f) => ({
+      id: randomId(),
+      name: f.name,
+      size: f.size,
+      file: f,
+      status: "pending",
+    }));
+    setTasks((prev) => [...prev, ...newTasks]);
+  };
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+  };
+
+  const onSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) handleFiles(e.target.files);
+    e.target.value = "";
+  };
+
+  const startUpload = async () => {
+    const pending = tasks.filter((t) => t.status === "pending" || t.status === "failed");
+    if (pending.length === 0) return;
+    setUploading(true);
+
+    for (const t of pending) {
+      setTasks((prev) =>
+        prev.map((p) => (p.id === t.id ? { ...p, status: "uploading" } : p)),
+      );
+      try {
+        await api.images.uploadOne(t.file);
+        setTasks((prev) =>
+          prev.map((p) => (p.id === t.id ? { ...p, status: "uploaded" } : p)),
+        );
+      } catch (e) {
+        setTasks((prev) =>
+          prev.map((p) =>
+            p.id === t.id
+              ? { ...p, status: "failed", error: e instanceof Error ? e.message : "Upload failed" }
+              : p,
+          ),
+        );
+      }
+    }
+
+    setUploading(false);
+    fetchStats();
+  };
+
+  const totalDone = tasks.filter((t) => t.status === "uploaded").length;
+  const pct = tasks.length === 0 ? 0 : Math.round((totalDone / tasks.length) * 100);
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-[14px]">
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-[#FAFAFA] font-sans">
@@ -69,105 +160,214 @@ export default function UploadPage() {
       <main className="flex-1 lg:ml-[200px]">
         <Header />
 
-        {/* Page Content */}
         <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
-          {/* Page Title */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <h1 className="text-xl sm:text-[22px] font-semibold text-gray-900">Upload Dataset</h1>
-            <button className="flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg text-[13px] font-medium transition-colors">
+            <button
+              onClick={startUpload}
+              disabled={uploading || tasks.every((t) => t.status === "uploaded")}
+              className="flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white px-4 py-2.5 rounded-lg text-[13px] font-medium transition-colors"
+            >
               <UploadIconSmall />
-              Start Upload
+              {uploading ? "Uploading…" : "Start Upload"}
             </button>
           </div>
 
-          {/* Upload Zone */}
-          <div className="border-2 border-dashed border-orange-300 bg-orange-50/30 rounded-xl p-6 sm:p-10 flex flex-col items-center justify-center mb-6 hover:border-orange-400 transition-colors cursor-pointer">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => inputRef.current?.click()}
+            className={`border-2 border-dashed ${
+              dragging ? "border-orange-500 bg-orange-50" : "border-orange-300 bg-orange-50/30"
+            } rounded-xl p-6 sm:p-10 flex flex-col items-center justify-center mb-6 hover:border-orange-400 transition-colors cursor-pointer`}
+          >
+            <input
+              type="file"
+              ref={inputRef}
+              multiple
+              accept="image/*"
+              onChange={onSelect}
+              className="hidden"
+            />
             <div className="w-14 h-14 bg-orange-100 rounded-full flex items-center justify-center mb-4">
               <CloudUploadIcon />
             </div>
-            <p className="text-[14px] sm:text-[15px] text-gray-700 font-medium mb-1 text-center">Click to upload or drag and drop</p>
-            <p className="text-[12px] sm:text-[13px] text-gray-400 mb-4 text-center">SVG, PNG, JPG or GIF (max. 20MB)</p>
-            <button className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-[13px] font-medium transition-colors">
+            <p className="text-[14px] sm:text-[15px] text-gray-700 font-medium mb-1 text-center">
+              Click to upload or drag and drop
+            </p>
+            <p className="text-[12px] sm:text-[13px] text-gray-400 mb-4 text-center">
+              SVG, PNG, JPG or GIF (max. 50MB each)
+            </p>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                inputRef.current?.click();
+              }}
+              className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-[13px] font-medium transition-colors"
+            >
               Select Files
             </button>
           </div>
 
-          {/* Upload Progress */}
-          <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[14px] font-medium text-gray-700">Uploading 4 files...</span>
-            </div>
-            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mb-5">
-              <div className="w-[65%] h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full transition-all duration-300" />
-            </div>
-
-            {/* File List */}
-            <div className="space-y-3">
-              {uploadingFiles.map((file, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0"
+          {tasks.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[14px] font-medium text-gray-700">
+                  {uploading
+                    ? `Uploading ${tasks.length} file${tasks.length === 1 ? "" : "s"}…`
+                    : `${totalDone} of ${tasks.length} uploaded`}
+                </span>
+                <button
+                  onClick={() => setTasks([])}
+                  disabled={uploading}
+                  className="text-[12px] text-gray-400 hover:text-gray-600 disabled:opacity-50"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      file.status === "pending" ? "bg-gray-100" : "bg-orange-100"
-                    }`}>
-                      {file.status === "processing" ? (
-                        <SpinnerIcon />
-                      ) : (
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={file.status === "pending" ? "#9CA3AF" : "#F97316"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <polyline points="21 15 16 10 5 21" />
-                        </svg>
+                  Clear list
+                </button>
+              </div>
+              <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mb-5">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+
+              <div className="space-y-3">
+                {tasks.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          file.status === "pending"
+                            ? "bg-gray-100"
+                            : file.status === "failed"
+                              ? "bg-red-100"
+                              : "bg-orange-100"
+                        }`}
+                      >
+                        {file.status === "uploading" ? (
+                          <SpinnerIcon />
+                        ) : (
+                          <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke={
+                              file.status === "pending"
+                                ? "#9CA3AF"
+                                : file.status === "failed"
+                                  ? "#EF4444"
+                                  : "#F97316"
+                            }
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p
+                          className={`text-[13px] sm:text-[14px] truncate ${
+                            file.status === "pending" ? "text-gray-400" : "text-gray-700"
+                          }`}
+                        >
+                          {file.name}
+                        </p>
+                        {file.error && (
+                          <p className="text-[11px] text-red-500 truncate">{file.error}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {file.status === "uploaded" && (
+                        <>
+                          <CheckIcon />
+                          <span className="text-[11px] sm:text-[12px] text-green-500 font-medium">
+                            Uploaded
+                          </span>
+                        </>
+                      )}
+                      {file.status === "uploading" && (
+                        <span className="text-[11px] sm:text-[12px] text-orange-500 font-medium">
+                          Uploading…
+                        </span>
+                      )}
+                      {file.status === "pending" && (
+                        <span className="text-[11px] sm:text-[12px] text-gray-400 font-medium">
+                          Pending
+                        </span>
+                      )}
+                      {file.status === "failed" && (
+                        <span className="text-[11px] sm:text-[12px] text-red-500 font-medium">
+                          Failed
+                        </span>
                       )}
                     </div>
-                    <span className={`text-[13px] sm:text-[14px] truncate ${file.status === "pending" ? "text-gray-400" : "text-gray-700"}`}>
-                      {file.name}
-                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {file.status === "uploaded" && (
-                      <>
-                        <CheckIcon />
-                        <span className="text-[11px] sm:text-[12px] text-green-500 font-medium">Uploaded</span>
-                      </>
-                    )}
-                    {file.status === "processing" && (
-                      <span className="text-[11px] sm:text-[12px] text-orange-500 font-medium">Processing...</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Stats Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[13px] text-gray-500">Total Images</span>
-                <TotalImagesIcon />
-              </div>
-              <span className="text-[24px] sm:text-[26px] font-semibold text-gray-900">1,248</span>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[13px] text-orange-500">Pending Review</span>
-                <PendingIcon />
-              </div>
-              <span className="text-[24px] sm:text-[26px] font-semibold text-orange-500">142</span>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[13px] text-green-500">Annotated</span>
-                <AnnotatedCheckIcon />
-              </div>
-              <span className="text-[24px] sm:text-[26px] font-semibold text-green-500">854</span>
-            </div>
+            <StatCard label="Total Images" value={stats?.totalImages ?? 0} icon={<TotalImagesIcon />} />
+            <StatCard
+              label="Pending Review"
+              value={stats?.unreviewed ?? 0}
+              icon={<PendingIcon />}
+              tone="orange"
+            />
+            <StatCard
+              label="Annotated"
+              value={stats?.annotated ?? 0}
+              icon={<AnnotatedCheckIcon />}
+              tone="green"
+            />
           </div>
         </div>
       </main>
     </div>
   );
 }
+
+function StatCard({
+  label,
+  value,
+  icon,
+  tone = "gray",
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  tone?: "gray" | "orange" | "green";
+}) {
+  const labelColor =
+    tone === "orange" ? "text-orange-500" : tone === "green" ? "text-green-500" : "text-gray-500";
+  const valueColor =
+    tone === "orange" ? "text-orange-500" : tone === "green" ? "text-green-500" : "text-gray-900";
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3">
+        <span className={`text-[13px] ${labelColor}`}>{label}</span>
+        {icon}
+      </div>
+      <span className={`text-[24px] sm:text-[26px] font-semibold ${valueColor}`}>
+        {value.toLocaleString()}
+      </span>
+    </div>
+  );
+}
+

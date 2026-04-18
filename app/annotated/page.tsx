@@ -1,42 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { api, AnnotationResponse } from "../lib/api";
+import { useRequireAuth } from "../lib/auth";
 
-interface AnnotatedImage {
-  id: number;
-  name: string;
-  src: string;
-  tag: string;
-  selected: boolean;
-}
+type ExportFormat = "yolo" | "coco" | "pascal" | "csv" | "tfrecord";
 
-const annotatedImages: AnnotatedImage[] = [
-  { id: 1, name: "img_dataset_001.jpg", src: "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=400&h=300&fit=crop", tag: "Car", selected: true },
-  { id: 2, name: "street_cam_402.png", src: "https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=400&h=300&fit=crop", tag: "Pedestrian", selected: false },
-  { id: 3, name: "traffic_signal_05.jpg", src: "https://images.unsplash.com/photo-1518791841217-8f162f1e1131?w=400&h=300&fit=crop", tag: "Traffic Light", selected: true },
-  { id: 4, name: "vehicle_scan_22.jpg", src: "https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=400&h=300&fit=crop", tag: "Car", selected: false },
-  { id: 5, name: "park_data_88.jpg", src: "https://images.unsplash.com/photo-1415369629372-26f2fe60c467?w=400&h=300&fit=crop", tag: "Cat", selected: false },
-  { id: 6, name: "cat_outdoors_12.jpg", src: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=400&h=300&fit=crop", tag: "Nature", selected: true },
-  { id: 7, name: "moto_003.jpg", src: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=300&fit=crop", tag: "Motorcycle", selected: false },
-  { id: 8, name: "highway_truck_09.jpg", src: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop", tag: "Truck", selected: true },
-];
-
-const exportFormats = [
+const exportFormats: { id: ExportFormat; label: string; description: string }[] = [
   { id: "yolo", label: "YOLO v8", description: "Popular format for real-time detection" },
   { id: "coco", label: "COCO JSON", description: "Microsoft COCO dataset format" },
   { id: "pascal", label: "Pascal VOC", description: "XML-based annotation format" },
   { id: "csv", label: "CSV", description: "Simple spreadsheet format" },
-  { id: "tfrecord", label: "TFRecord", description: "TensorFlow dataset format" },
+  { id: "tfrecord", label: "TFRecord", description: "TensorFlow dataset format (CSV export)" },
 ];
-
-const SearchIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </svg>
-);
 
 const ChevronDownIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -73,28 +51,139 @@ const CheckCircleIcon = () => (
   </svg>
 );
 
+type SortKey = "newest" | "oldest";
+
 export default function AnnotatedPage() {
-  const [images, setImages] = useState(annotatedImages);
+  const { user, loading: authLoading } = useRequireAuth();
+  const [annotations, setAnnotations] = useState<AnnotationResponse[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [selectedFormat, setSelectedFormat] = useState(exportFormats[0]);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [classFilter, setClassFilter] = useState<string>("all");
+  const [classOpen, setClassOpen] = useState(false);
+  const [sort, setSort] = useState<SortKey>("newest");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
-  const selectedCount = images.filter((img) => img.selected).length;
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await api.annotations.list();
+      setAnnotations(list);
+      setSelected(new Set(list.filter((a) => a.status === "APPROVED").map((a) => a.id)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load annotations");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const toggleSelection = (id: number) => {
-    setImages((prev) =>
-      prev.map((img) =>
-        img.id === id ? { ...img, selected: !img.selected } : img
-      )
+  useEffect(() => {
+    if (user) load();
+  }, [user]);
+
+  const classes = useMemo(() => {
+    const set = new Set<string>();
+    annotations.forEach((a) => set.add(a.prompt));
+    return Array.from(set);
+  }, [annotations]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    const items = annotations.filter((a) => {
+      if (classFilter !== "all" && a.prompt !== classFilter) return false;
+      if (!q) return true;
+      return a.imageFileName.toLowerCase().includes(q) || a.prompt.toLowerCase().includes(q);
+    });
+    return items.sort((a, b) =>
+      sort === "newest"
+        ? +new Date(b.createdAt) - +new Date(a.createdAt)
+        : +new Date(a.createdAt) - +new Date(b.createdAt),
     );
+  }, [annotations, search, classFilter, sort]);
+
+  const toggleSelection = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const selectAll = () => setSelected(new Set(filtered.map((a) => a.id)));
+  const invertSelection = () =>
+    setSelected((prev) => {
+      const next = new Set<number>();
+      filtered.forEach((a) => {
+        if (!prev.has(a.id)) next.add(a.id);
+      });
+      return next;
+    });
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
-  const selectAll = () => {
-    setImages((prev) => prev.map((img) => ({ ...img, selected: true })));
+  const exportDataset = async () => {
+    if (selected.size === 0) {
+      setError("Select at least one annotation to export");
+      return;
+    }
+    setError(null);
+    setExporting(true);
+    try {
+      const blob = await api.dataset.export(selectedFormat.id, {
+        annotationIds: Array.from(selected),
+        approvedOnly: false,
+      });
+      downloadBlob(blob, `labely-export-${selectedFormat.id}.zip`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const invertSelection = () => {
-    setImages((prev) => prev.map((img) => ({ ...img, selected: !img.selected })));
+  const downloadImages = () => {
+    const chosen = filtered.filter((a) => selected.has(a.id));
+    chosen.forEach((a) => {
+      const link = document.createElement("a");
+      link.href = a.imageUrl;
+      link.download = a.imageFileName;
+      link.target = "_blank";
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
   };
+
+  const lastModified = useMemo(() => {
+    if (annotations.length === 0) return "—";
+    const latest = annotations.reduce((acc, a) =>
+      +new Date(a.createdAt) > +new Date(acc.createdAt) ? a : acc,
+    );
+    return new Date(latest.createdAt).toLocaleString();
+  }, [annotations]);
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-[14px]">
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-[#FAFAFA] font-sans">
@@ -103,42 +192,98 @@ export default function AnnotatedPage() {
       <main className="flex-1 lg:ml-[200px] flex flex-col">
         <Header />
 
-        {/* Page Content */}
         <div className="flex-1 p-4 sm:p-6">
-          {/* Page Title */}
           <div className="mb-1">
             <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900">Annotated Dataset</h1>
             <p className="text-[13px] sm:text-[14px] text-gray-500 mt-1">
-              342 images | 12 classes | Last modified 2m ago
+              {annotations.length} annotations | {classes.length} classes | Last modified {lastModified}
             </p>
           </div>
 
-          {/* Toolbar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-5 mb-6">
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-              {/* Search */}
               <div className="relative flex-1 sm:flex-initial">
-                {/* <SearchIcon /> */}
                 <input
                   type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by filename or tag..."
-                  className="w-full sm:w-[280px] pl-10 pr-4 py-2.5 bg-orange-50 border border-orange-100 rounded-lg text-[13px] text-gray-700 placeholder-gray-400 focus:outline-none focus:border-orange-300 transition-all absolute left-0 top-1/2 -translate-y-1/2"
-                  style={{ paddingLeft: '36px' }}
+                  className="w-full sm:w-[280px] px-4 py-2.5 bg-orange-50 border border-orange-100 rounded-lg text-[13px] text-gray-700 placeholder-gray-400 focus:outline-none focus:border-orange-300 transition-all"
                 />
-                <div className="w-full sm:w-[280px] h-[42px]" />
               </div>
 
-              {/* All Classes Dropdown */}
-              <button className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:border-gray-300 transition-colors">
-                <span className="hidden sm:inline">All</span> Classes
-                <ChevronDownIcon />
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setClassOpen((v) => !v)}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:border-gray-300 transition-colors"
+                >
+                  <span>{classFilter === "all" ? "All Classes" : classFilter}</span>
+                  <ChevronDownIcon />
+                </button>
+                {classOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setClassOpen(false)} />
+                    <div className="absolute top-full mt-1 left-0 min-w-[180px] bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden max-h-[260px] overflow-y-auto">
+                      <button
+                        onClick={() => {
+                          setClassFilter("all");
+                          setClassOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 text-[13px] hover:bg-gray-50 ${
+                          classFilter === "all" ? "bg-orange-50 text-orange-600" : "text-gray-700"
+                        }`}
+                      >
+                        All Classes
+                      </button>
+                      {classes.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => {
+                            setClassFilter(c);
+                            setClassOpen(false);
+                          }}
+                          className={`w-full text-left px-4 py-2 text-[13px] hover:bg-gray-50 ${
+                            classFilter === c ? "bg-orange-50 text-orange-600" : "text-gray-700"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
 
-              {/* Sort Dropdown */}
-              <button className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:border-gray-300 transition-colors">
-                <span className="hidden sm:inline">Newest</span> First
-                <ChevronDownIcon />
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSortOpen((v) => !v)}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:border-gray-300 transition-colors"
+                >
+                  <span>{sort === "newest" ? "Newest First" : "Oldest First"}</span>
+                  <ChevronDownIcon />
+                </button>
+                {sortOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
+                    <div className="absolute top-full mt-1 left-0 min-w-[160px] bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                      <button
+                        onClick={() => { setSort("newest"); setSortOpen(false); }}
+                        className={`w-full text-left px-4 py-2 text-[13px] hover:bg-gray-50 ${sort === "newest" ? "bg-orange-50 text-orange-600" : "text-gray-700"}`}
+                      >
+                        Newest First
+                      </button>
+                      <button
+                        onClick={() => { setSort("oldest"); setSortOpen(false); }}
+                        className={`w-full text-left px-4 py-2 text-[13px] hover:bg-gray-50 ${sort === "oldest" ? "bg-orange-50 text-orange-600" : "text-gray-700"}`}
+                      >
+                        Oldest First
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
@@ -157,67 +302,83 @@ export default function AnnotatedPage() {
             </div>
           </div>
 
-          {/* Image Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
-            {images.map((image) => (
-              <div
-                key={image.id}
-                className="group cursor-pointer"
-                onClick={() => toggleSelection(image.id)}
-              >
-                {/* Image Container */}
-                <div
-                  className={`relative rounded-xl overflow-hidden aspect-[4/3] ${
-                    image.selected ? "ring-2 ring-orange-500" : ""
-                  }`}
-                >
-                  <img
-                    src={image.src}
-                    alt={image.name}
-                    className="w-full h-full object-cover"
-                  />
+          {error && (
+            <div className="mb-4 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-[13px] text-red-600">
+              {error}
+            </div>
+          )}
 
-                  {/* Selection Checkbox */}
+          {loading ? (
+            <p className="text-center py-10 text-gray-500 text-[14px]">Loading…</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-center py-10 text-gray-500 text-[14px]">
+              No annotations. Run one from the <a href="/gallery" className="text-orange-500 hover:underline">Gallery</a>.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+              {filtered.map((ann) => {
+                const isSel = selected.has(ann.id);
+                return (
                   <div
-                    className={`absolute top-3 left-3 w-5 h-5 rounded flex items-center justify-center transition-all ${
-                      image.selected
-                        ? "bg-orange-500"
-                        : "bg-white/80 border border-gray-300 opacity-0 group-hover:opacity-100"
-                    }`}
+                    key={ann.id}
+                    className="group cursor-pointer"
+                    onClick={() => toggleSelection(ann.id)}
                   >
-                    {image.selected && <CheckIcon />}
+                    <div
+                      className={`relative rounded-xl overflow-hidden aspect-[4/3] bg-gray-100 ${
+                        isSel ? "ring-2 ring-orange-500" : ""
+                      }`}
+                    >
+                      <img
+                        src={ann.overlayUrl ?? ann.imageUrl}
+                        alt={ann.imageFileName}
+                        className="w-full h-full object-cover"
+                      />
+                      <div
+                        className={`absolute top-3 left-3 w-5 h-5 rounded flex items-center justify-center transition-all ${
+                          isSel
+                            ? "bg-orange-500"
+                            : "bg-white/80 border border-gray-300 opacity-0 group-hover:opacity-100"
+                        }`}
+                      >
+                        {isSel && <CheckIcon />}
+                      </div>
+                      <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                        {ann.status}
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-[12px] sm:text-[13px] text-gray-700 font-medium truncate">
+                        {ann.imageFileName}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="inline-block px-2 sm:px-2.5 py-1 bg-gray-100 text-gray-600 text-[10px] sm:text-[11px] font-medium rounded">
+                          {ann.prompt}
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          {ann.numInstances} {ann.numInstances === 1 ? "detection" : "detections"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                {/* Image Info */}
-                <div className="mt-2">
-                  <p className="text-[12px] sm:text-[13px] text-gray-700 font-medium truncate">
-                    {image.name}
-                  </p>
-                  <span className="inline-block mt-1 px-2 sm:px-2.5 py-1 bg-gray-100 text-gray-600 text-[10px] sm:text-[11px] font-medium rounded">
-                    {image.tag}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Bottom Bar */}
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 sm:px-6 py-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 max-w-[1200px] mx-auto">
-            {/* Selection Info */}
             <div className="flex flex-col">
               <span className="text-[14px] font-medium text-gray-800">
-                {selectedCount} Images Selected
+                {selected.size} Annotation{selected.size === 1 ? "" : "s"} Selected
               </span>
               <span className="text-[12px] text-gray-400">Ready to export</span>
             </div>
 
-            {/* Export Format Dropdown */}
             <div className="relative">
-              <button 
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              <button
+                onClick={() => setFormatOpen(!formatOpen)}
                 className="flex items-center justify-between gap-3 px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] font-medium text-gray-700 hover:border-gray-300 transition-colors w-full sm:w-[220px]"
               >
                 <div className="flex flex-col items-start">
@@ -227,13 +388,9 @@ export default function AnnotatedPage() {
                 <ChevronDownIcon />
               </button>
 
-              {/* Dropdown Menu */}
-              {isDropdownOpen && (
+              {formatOpen && (
                 <>
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => setIsDropdownOpen(false)}
-                  />
+                  <div className="fixed inset-0 z-40" onClick={() => setFormatOpen(false)} />
                   <div className="absolute bottom-full mb-2 left-0 right-0 sm:right-auto sm:w-[280px] bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
                     <div className="py-2 max-h-[300px] overflow-y-auto">
                       {exportFormats.map((format) => (
@@ -241,23 +398,19 @@ export default function AnnotatedPage() {
                           key={format.id}
                           onClick={() => {
                             setSelectedFormat(format);
-                            setIsDropdownOpen(false);
+                            setFormatOpen(false);
                           }}
                           className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left ${
                             selectedFormat.id === format.id ? "bg-orange-50" : ""
                           }`}
                         >
                           <div className="flex-1">
-                            <p className={`text-[14px] font-medium ${
-                              selectedFormat.id === format.id ? "text-orange-600" : "text-gray-800"
-                            }`}>
+                            <p className={`text-[14px] font-medium ${selectedFormat.id === format.id ? "text-orange-600" : "text-gray-800"}`}>
                               {format.label}
                             </p>
                             <p className="text-[12px] text-gray-400">{format.description}</p>
                           </div>
-                          {selectedFormat.id === format.id && (
-                            <CheckCircleIcon />
-                          )}
+                          {selectedFormat.id === format.id && <CheckCircleIcon />}
                         </button>
                       ))}
                     </div>
@@ -266,15 +419,22 @@ export default function AnnotatedPage() {
               )}
             </div>
 
-            {/* Action Buttons */}
             <div className="flex items-center gap-3">
-              <button className="flex items-center justify-center gap-2 flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+              <button
+                onClick={downloadImages}
+                disabled={selected.size === 0}
+                className="flex items-center justify-center gap-2 flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 border border-gray-200 rounded-lg text-[13px] font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-40"
+              >
                 <DownloadIcon />
                 <span className="hidden sm:inline">Download</span> Images
               </button>
-              <button className="flex items-center justify-center gap-2 flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[13px] font-medium transition-colors">
+              <button
+                onClick={exportDataset}
+                disabled={exporting || selected.size === 0}
+                className="flex items-center justify-center gap-2 flex-1 sm:flex-initial px-4 sm:px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white rounded-lg text-[13px] font-medium transition-colors"
+              >
                 <ExportIcon />
-                Export <span className="hidden sm:inline">Dataset</span>
+                {exporting ? "Exporting…" : "Export"} <span className="hidden sm:inline">Dataset</span>
               </button>
             </div>
           </div>

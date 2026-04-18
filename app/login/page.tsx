@@ -1,17 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+import { useAuth } from "../lib/auth";
 
 const Logo = () => (
-  <div className="flex items-center gap-2">
-    <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-500 rounded-xl flex items-center justify-center">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 16v-4" />
-        <path d="M12 8h.01" />
-      </svg>
-    </div>
+  <div className="flex items-center gap-2.5">
+    <Image src="/logo_final.png" alt="LabelyAI" width={40} height={40} />
     <span className="font-bold text-xl text-gray-900">LabelyAI</span>
   </div>
 );
@@ -47,53 +44,85 @@ const GithubIcon = () => (
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const router = useRouter();
+  const { login, user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && user) router.replace("/upload");
+  }, [user, loading, router]);
+
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await login(email, password);
+      router.replace("/upload");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] font-sans flex">
       {/* Left Side - Form */}
       <div className="flex-1 flex items-center justify-center px-8">
         <div className="w-full max-w-md">
-          {/* Logo */}
           <div className="mb-8">
             <Link href="/">
               <Logo />
             </Link>
           </div>
 
-          {/* Header */}
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome back</h1>
             <p className="text-gray-500">Sign in to your account to continue</p>
           </div>
 
-          {/* Social Login */}
           <div className="flex gap-3 mb-6">
-            <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+            <button
+              type="button"
+              disabled
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] font-medium text-gray-400 cursor-not-allowed"
+              title="OAuth not implemented yet"
+            >
               <GoogleIcon />
               Google
             </button>
-            <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+            <button
+              type="button"
+              disabled
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] font-medium text-gray-400 cursor-not-allowed"
+              title="OAuth not implemented yet"
+            >
               <GithubIcon />
               GitHub
             </button>
           </div>
 
-          {/* Divider */}
           <div className="flex items-center gap-4 mb-6">
             <div className="flex-1 h-px bg-gray-200" />
             <span className="text-[13px] text-gray-400">or continue with email</span>
             <div className="flex-1 h-px bg-gray-200" />
           </div>
 
-          {/* Form */}
-          <form className="space-y-4">
+          <form className="space-y-4" onSubmit={onSubmit}>
             <div>
               <label className="block text-[13px] font-medium text-gray-700 mb-1.5">
                 Email address
               </label>
               <input
                 type="email"
+                required
                 placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-all"
               />
             </div>
@@ -110,7 +139,10 @@ export default function LoginPage() {
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
+                  required
                   placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-3 pr-12 bg-white border border-gray-200 rounded-xl text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-all"
                 />
                 <button
@@ -123,6 +155,12 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {error && (
+              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-[13px] text-red-600">
+                {error}
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -134,17 +172,15 @@ export default function LoginPage() {
               </label>
             </div>
 
-            <Link href="/upload">
-              <button
-                type="button"
-                className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white text-[14px] font-medium rounded-xl transition-colors mt-2"
-              >
-                Sign in
-              </button>
-            </Link>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white text-[14px] font-medium rounded-xl transition-colors mt-2"
+            >
+              {submitting ? "Signing in…" : "Sign in"}
+            </button>
           </form>
 
-          {/* Sign Up Link */}
           <p className="mt-8 text-center text-[14px] text-gray-600">
             Don&apos;t have an account?{" "}
             <Link href="/register" className="text-orange-500 hover:text-orange-600 font-medium">
@@ -155,7 +191,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right Side - Decorative */}
-      <div className="hidden lg:flex flex-1 bg-gradient-to-br from-orange-500 to-amber-500 items-center justify-center p-12">
+      <div className="hidden lg:flex flex-1 bg-gradient-to-br from-[#F97316] to-[#4B6878] items-center justify-center p-12">
         <div className="max-w-md text-white">
           <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-8">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -165,7 +201,7 @@ export default function LoginPage() {
           <h2 className="text-3xl font-bold mb-4">
             Annotate images 10x faster with AI
           </h2>
-          <p className="text-orange-100 text-lg leading-relaxed">
+          <p className="text-white/75 text-lg leading-relaxed">
             Join over 5,000 ML engineers who trust LabelyAI for their annotation workflows.
             Start with 1,000 free credits today.
           </p>
@@ -180,7 +216,7 @@ export default function LoginPage() {
                 </div>
               ))}
             </div>
-            <p className="text-orange-100 text-[14px]">
+            <p className="text-white/75 text-[14px]">
               <span className="font-semibold text-white">5,000+</span> happy users
             </p>
           </div>
