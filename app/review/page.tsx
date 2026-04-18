@@ -1,71 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
+import { api, AnnotationResponse, AnnotationStatus } from "../lib/api";
+import { useRequireAuth } from "../lib/auth";
 
-type ImageStatus = "unreviewed" | "approved" | "rejected";
-
-interface ReviewImage {
-  id: number;
-  name: string;
-  status: ImageStatus;
-}
-
-const reviewImages: ReviewImage[] = [
-  { id: 1, name: "IMG_4021.png", status: "unreviewed" },
-  { id: 2, name: "IMG_4321.png", status: "unreviewed" },
-  { id: 3, name: "IMG_3321.png", status: "approved" },
-  { id: 4, name: "IMG_4521.png", status: "rejected" },
-  { id: 5, name: "IMG_6371.png", status: "approved" },
-  { id: 6, name: "IMG_2321.png", status: "rejected" },
-  { id: 7, name: "IMG_6721.png", status: "unreviewed" },
-  { id: 8, name: "IMG_6431.png", status: "approved" },
-];
+type Tab = "all" | "unreviewed" | "approved" | "rejected";
 
 const ImageIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
     <circle cx="8.5" cy="8.5" r="1.5" />
     <polyline points="21 15 16 10 5 21" />
-  </svg>
-);
-
-// Annotation Tool Icons
-const RectangleIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" />
-  </svg>
-);
-
-const PolygonIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
-  </svg>
-);
-
-const BrushIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9.06 11.9l8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
-    <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
-  </svg>
-);
-
-const EraserIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-    <path d="M22 21H7" />
-    <path d="m5 11 9 9" />
-  </svg>
-);
-
-const MagicWandIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m15 4-3 3" />
-    <path d="m18 7-3 3" />
-    <path d="m11 11-8 8a1 1 0 1 0 1.42 1.42l8-8" />
-    <path d="m9 5 1-1" />
-    <path d="m5 9-1 1" />
   </svg>
 );
 
@@ -86,37 +33,10 @@ const ZoomOutIcon = () => (
   </svg>
 );
 
-const ExpandIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="15 3 21 3 21 9" />
-    <polyline points="9 21 3 21 3 15" />
-    <line x1="21" y1="3" x2="14" y2="10" />
-    <line x1="3" y1="21" x2="10" y2="14" />
-  </svg>
-);
-
-const MoveIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 9l-3 3 3 3" />
-    <path d="M9 5l3-3 3 3" />
-    <path d="M15 19l-3 3-3-3" />
-    <path d="M19 9l3 3-3 3" />
-    <line x1="2" y1="12" x2="22" y2="12" />
-    <line x1="12" y1="2" x2="12" y2="22" />
-  </svg>
-);
-
-const UndoIcon = () => (
+const ResetIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 7v6h6" />
-    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
-  </svg>
-);
-
-const RedoIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 7v6h-6" />
-    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+    <polyline points="23 4 23 10 17 10" />
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
   </svg>
 );
 
@@ -149,68 +69,121 @@ const TransferIcon = () => (
   </svg>
 );
 
-const StatusBadge = ({ status }: { status: ImageStatus }) => {
-  const styles = {
-    unreviewed: "bg-gray-100 text-gray-500",
-    approved: "bg-green-100 text-green-600",
-    rejected: "bg-red-100 text-red-500",
-  };
+const statusBadgeStyles: Record<AnnotationStatus, string> = {
+  UNREVIEWED: "bg-gray-100 text-gray-500",
+  APPROVED: "bg-green-100 text-green-600",
+  REJECTED: "bg-red-100 text-red-500",
+};
 
-  const labels = {
-    unreviewed: "Unreviewed",
-    approved: "Approved",
-    rejected: "Rejected",
-  };
-
-  return (
-    <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${styles[status]}`}>
-      {labels[status]}
-    </span>
-  );
+const statusLabels: Record<AnnotationStatus, string> = {
+  UNREVIEWED: "Unreviewed",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
 };
 
 export default function ReviewPage() {
-  const [images, setImages] = useState(reviewImages);
-  const [selectedId, setSelectedId] = useState(3);
-  const [activeTab, setActiveTab] = useState<"all" | ImageStatus>("all");
-  const [activeTool, setActiveTool] = useState("rectangle");
+  const { user, loading: authLoading } = useRequireAuth();
+  const [annotations, setAnnotations] = useState<AnnotationResponse[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("unreviewed");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showImageList, setShowImageList] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [updating, setUpdating] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const counts = {
-    unreviewed: images.filter((img) => img.status === "unreviewed").length,
-    approved: images.filter((img) => img.status === "approved").length,
-    rejected: images.filter((img) => img.status === "rejected").length,
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await api.annotations.list();
+      setAnnotations(list);
+      if (list.length > 0 && selectedId == null) setSelectedId(list[0].id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load annotations");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredImages = activeTab === "all" 
-    ? images 
-    : images.filter((img) => img.status === activeTab);
+  useEffect(() => {
+    if (user) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
-  const selectedImage = images.find((img) => img.id === selectedId);
+  const counts = useMemo(() => {
+    return {
+      unreviewed: annotations.filter((a) => a.status === "UNREVIEWED").length,
+      approved: annotations.filter((a) => a.status === "APPROVED").length,
+      rejected: annotations.filter((a) => a.status === "REJECTED").length,
+    };
+  }, [annotations]);
 
-  const handleApprove = () => {
-    setImages((prev) =>
-      prev.map((img) =>
-        img.id === selectedId ? { ...img, status: "approved" as ImageStatus } : img
-      )
+  const filtered = useMemo(() => {
+    if (activeTab === "all") return annotations;
+    const statusMap: Record<Exclude<Tab, "all">, AnnotationStatus> = {
+      unreviewed: "UNREVIEWED",
+      approved: "APPROVED",
+      rejected: "REJECTED",
+    };
+    return annotations.filter((a) => a.status === statusMap[activeTab]);
+  }, [annotations, activeTab]);
+
+  const selected = useMemo(
+    () => annotations.find((a) => a.id === selectedId) ?? null,
+    [annotations, selectedId],
+  );
+
+  const changeStatus = async (decision: AnnotationStatus) => {
+    if (!selected) return;
+    setUpdating(true);
+    setError(null);
+    try {
+      const updated = await api.annotations.review(selected.id, decision);
+      setAnnotations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Review failed");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const deleteCurrent = async () => {
+    if (!selected) return;
+    if (!confirm("Delete this annotation?")) return;
+    try {
+      await api.annotations.remove(selected.id);
+      setAnnotations((prev) => prev.filter((a) => a.id !== selected.id));
+      setSelectedId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    }
+  };
+
+  const transferApproved = async () => {
+    setTransferring(true);
+    setError(null);
+    try {
+      const res = await api.annotations.transferApproved();
+      setToast(`Transferred ${res.transferred} approved annotation${res.transferred === 1 ? "" : "s"}`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Transfer failed");
+    } finally {
+      setTransferring(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-[14px]">
+        Loading…
+      </div>
     );
-  };
-
-  const handleReject = () => {
-    setImages((prev) =>
-      prev.map((img) =>
-        img.id === selectedId ? { ...img, status: "rejected" as ImageStatus } : img
-      )
-    );
-  };
-
-  const annotationTools = [
-    { id: "rectangle", icon: RectangleIcon, label: "Bounding Box" },
-    { id: "polygon", icon: PolygonIcon, label: "Polygon" },
-    { id: "brush", icon: BrushIcon, label: "Brush" },
-    { id: "eraser", icon: EraserIcon, label: "Eraser" },
-    { id: "magic", icon: MagicWandIcon, label: "Magic Select" },
-  ];
+  }
 
   return (
     <div className="flex min-h-screen bg-[#FAFAFA] font-sans">
@@ -219,9 +192,7 @@ export default function ReviewPage() {
       <main className="flex-1 lg:ml-[200px] flex flex-col">
         <Header />
 
-        {/* Page Content */}
         <div className="flex-1 p-4 sm:p-6 flex flex-col">
-          {/* Page Title */}
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900">Annotation Review</h1>
             <button
@@ -232,138 +203,142 @@ export default function ReviewPage() {
             </button>
           </div>
 
-          {/* Main Content Area */}
-          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6">
-            {/* Left Panel - Image List */}
-            <div className={`${showImageList ? 'block' : 'hidden'} lg:block w-full lg:w-[300px] xl:w-[340px] flex flex-col`}>
-              {/* Tabs */}
-              <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-2 lg:pb-0">
-                <button
-                  onClick={() => setActiveTab("unreviewed")}
-                  className={`px-3 py-2 text-[13px] font-medium rounded-lg transition-colors whitespace-nowrap ${
-                    activeTab === "unreviewed"
-                      ? "bg-gray-100 text-gray-800"
-                      : "text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  Unreviewed
-                  <span className="ml-1 text-gray-400">({counts.unreviewed})</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab("approved")}
-                  className={`px-3 py-2 text-[13px] font-medium rounded-lg transition-colors whitespace-nowrap ${
-                    activeTab === "approved"
-                      ? "bg-gray-100 text-gray-800"
-                      : "text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  Approved
-                  <span className="ml-1 text-gray-400">({counts.approved})</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab("rejected")}
-                  className={`px-3 py-2 text-[13px] font-medium rounded-lg transition-colors whitespace-nowrap ${
-                    activeTab === "rejected"
-                      ? "bg-gray-100 text-gray-800"
-                      : "text-gray-500 hover:bg-gray-50"
-                  }`}
-                >
-                  Rejected
-                  <span className="ml-1 text-gray-400">({counts.rejected})</span>
-                </button>
-              </div>
+          {error && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-[13px] text-red-600">
+              {error}
+            </div>
+          )}
+          {toast && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-green-50 border border-green-100 text-[13px] text-green-700">
+              {toast}
+            </div>
+          )}
 
-              {/* Image List */}
-              <div className="flex-1 overflow-y-auto space-y-2 max-h-[200px] lg:max-h-none">
-                {filteredImages.map((image) => (
-                  <div
-                    key={image.id}
-                    onClick={() => {
-                      setSelectedId(image.id);
-                      if (window.innerWidth < 1024) setShowImageList(false);
-                    }}
-                    className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
-                      selectedId === image.id
-                        ? "bg-white border-2 border-orange-200 shadow-sm"
-                        : "bg-white border border-gray-100 hover:border-gray-200"
+          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6">
+            <div className={`${showImageList ? "block" : "hidden"} lg:block w-full lg:w-[300px] xl:w-[340px] flex flex-col`}>
+              <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-2 lg:pb-0">
+                {(
+                  [
+                    { id: "unreviewed", label: "Unreviewed", count: counts.unreviewed },
+                    { id: "approved", label: "Approved", count: counts.approved },
+                    { id: "rejected", label: "Rejected", count: counts.rejected },
+                  ] as { id: Tab; label: string; count: number }[]
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`px-3 py-2 text-[13px] font-medium rounded-lg transition-colors whitespace-nowrap ${
+                      activeTab === t.id ? "bg-gray-100 text-gray-800" : "text-gray-500 hover:bg-gray-50"
                     }`}
                   >
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <ImageIcon />
-                    </div>
-                    <div className="flex flex-col gap-1 min-w-0">
-                      <span className="text-[13px] sm:text-[14px] font-medium text-gray-800 truncate">
-                        {image.name}
-                      </span>
-                      <StatusBadge status={image.status} />
-                    </div>
-                  </div>
+                    {t.label} <span className="ml-1 text-gray-400">({t.count})</span>
+                  </button>
                 ))}
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2 max-h-[200px] lg:max-h-none">
+                {loading ? (
+                  <p className="text-[13px] text-gray-400 px-2 py-4">Loading…</p>
+                ) : filtered.length === 0 ? (
+                  <p className="text-[13px] text-gray-400 px-2 py-4">No annotations in this tab.</p>
+                ) : (
+                  filtered.map((ann) => (
+                    <div
+                      key={ann.id}
+                      onClick={() => {
+                        setSelectedId(ann.id);
+                        setZoom(1);
+                        if (window.innerWidth < 1024) setShowImageList(false);
+                      }}
+                      className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                        selectedId === ann.id
+                          ? "bg-white border-2 border-orange-200 shadow-sm"
+                          : "bg-white border border-gray-100 hover:border-gray-200"
+                      }`}
+                    >
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {ann.overlayUrl || ann.imageUrl ? (
+                          <img
+                            src={ann.overlayUrl ?? ann.imageUrl}
+                            alt={ann.imageFileName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <ImageIcon />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1 min-w-0">
+                        <span className="text-[13px] sm:text-[14px] font-medium text-gray-800 truncate">
+                          {ann.imageFileName}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${statusBadgeStyles[ann.status]}`}>
+                            {statusLabels[ann.status]}
+                          </span>
+                          <span className="text-[10px] text-gray-400">{ann.prompt}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
-            {/* Right Panel - Image Preview */}
             <div className="flex-1 flex flex-col min-h-0">
-              {/* Annotation Toolbar */}
               <div className="bg-white rounded-xl border border-gray-100 p-2 sm:p-3 mb-4">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  {/* Annotation Tools */}
-                  <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-lg">
-                    {annotationTools.map((tool) => (
-                      <button
-                        key={tool.id}
-                        onClick={() => setActiveTool(tool.id)}
-                        className={`p-2 rounded-md transition-colors ${
-                          activeTool === tool.id
-                            ? "bg-orange-500 text-white"
-                            : "text-gray-500 hover:bg-gray-100"
-                        }`}
-                        title={tool.label}
-                      >
-                        <tool.icon />
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="w-px h-8 bg-gray-200 hidden sm:block" />
-
-                  {/* View Controls */}
                   <div className="flex items-center gap-1">
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Zoom In">
+                    <button
+                      onClick={() => setZoom((z) => Math.min(z + 0.25, 4))}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
+                      title="Zoom In"
+                    >
                       <ZoomInIcon />
                     </button>
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Zoom Out">
+                    <button
+                      onClick={() => setZoom((z) => Math.max(z - 0.25, 0.25))}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
+                      title="Zoom Out"
+                    >
                       <ZoomOutIcon />
                     </button>
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Fullscreen">
-                      <ExpandIcon />
+                    <button
+                      onClick={() => setZoom(1)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500"
+                      title="Reset Zoom"
+                    >
+                      <ResetIcon />
                     </button>
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Pan">
-                      <MoveIcon />
-                    </button>
+                    <span className="text-[12px] text-gray-500 min-w-[40px] text-center">
+                      {Math.round(zoom * 100)}%
+                    </span>
                   </div>
 
-                  <div className="w-px h-8 bg-gray-200 hidden sm:block" />
+                  <div className="w-px h-8 bg-gray-200" />
 
-                  {/* History Controls */}
                   <div className="flex items-center gap-1">
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Undo">
-                      <UndoIcon />
-                    </button>
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-500" title="Redo">
-                      <RedoIcon />
-                    </button>
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Delete Annotation">
+                    <button
+                      onClick={deleteCurrent}
+                      disabled={!selected}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40"
+                      title="Delete annotation"
+                    >
                       <TrashIcon />
                     </button>
                   </div>
+
+                  {selected && (
+                    <div className="ml-auto flex items-center gap-2 text-[12px] text-gray-500">
+                      <span>{selected.numInstances} detections</span>
+                      <span>·</span>
+                      <span>{selected.imageWidth}×{selected.imageHeight}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Image Preview Area */}
-              <div className="flex-1 bg-[#1a1a1a] rounded-xl overflow-hidden relative flex items-center justify-center min-h-[250px] sm:min-h-[350px]">
-                {/* Checkered background pattern */}
-                <div 
+              <div className="flex-1 bg-[#1a1a1a] rounded-xl overflow-auto relative flex items-center justify-center min-h-[250px] sm:min-h-[350px]">
+                <div
                   className="absolute inset-0"
                   style={{
                     backgroundImage: `
@@ -372,44 +347,37 @@ export default function ReviewPage() {
                       linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
                       linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)
                     `,
-                    backgroundSize: '20px 20px',
-                    backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+                    backgroundSize: "20px 20px",
+                    backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
                   }}
                 />
 
-                {/* Sample annotated image */}
-                <div className="relative z-10 max-w-full max-h-full p-4">
-                  <img
-                    src="https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=700&h=400&fit=crop"
-                    alt="Annotated preview"
-                    className="max-w-full max-h-[200px] sm:max-h-[300px] lg:max-h-[400px] object-contain rounded-lg"
-                    style={{
-                      filter: 'contrast(1.1)',
-                    }}
-                  />
-                  {/* Overlay for annotation effect */}
-                  <div 
-                    className="absolute inset-4 rounded-lg pointer-events-none"
-                    style={{
-                      background: 'linear-gradient(135deg, rgba(217, 70, 239, 0.3) 0%, rgba(168, 85, 247, 0.2) 50%, transparent 100%)',
-                      mixBlendMode: 'overlay',
-                    }}
-                  />
-                </div>
+                {!selected ? (
+                  <p className="relative z-10 text-gray-300 text-[14px]">Select an annotation to preview</p>
+                ) : (
+                  <div className="relative z-10 p-4" style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}>
+                    <img
+                      src={selected.overlayUrl ?? selected.imageUrl}
+                      alt={selected.imageFileName}
+                      className="max-w-full max-h-[200px] sm:max-h-[400px] lg:max-h-[560px] object-contain rounded-lg"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Action Buttons */}
               <div className="flex items-center justify-center gap-3 sm:gap-4 mt-4">
                 <button
-                  onClick={handleApprove}
-                  className="flex items-center gap-2 px-4 sm:px-6 py-2.5 border-2 border-green-500 text-green-500 rounded-lg text-[14px] font-medium hover:bg-green-50 transition-colors"
+                  onClick={() => changeStatus("APPROVED")}
+                  disabled={!selected || updating}
+                  className="flex items-center gap-2 px-4 sm:px-6 py-2.5 border-2 border-green-500 text-green-500 rounded-lg text-[14px] font-medium hover:bg-green-50 transition-colors disabled:opacity-40"
                 >
                   <CheckIcon />
                   <span className="hidden sm:inline">Approve</span>
                 </button>
                 <button
-                  onClick={handleReject}
-                  className="flex items-center gap-2 px-4 sm:px-6 py-2.5 bg-red-500 text-white rounded-lg text-[14px] font-medium hover:bg-red-600 transition-colors"
+                  onClick={() => changeStatus("REJECTED")}
+                  disabled={!selected || updating}
+                  className="flex items-center gap-2 px-4 sm:px-6 py-2.5 bg-red-500 text-white rounded-lg text-[14px] font-medium hover:bg-red-600 transition-colors disabled:opacity-40"
                 >
                   <XIcon />
                   <span className="hidden sm:inline">Reject</span>
@@ -419,13 +387,20 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        {/* Bottom Bar */}
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 sm:px-6 py-4">
           <div className="flex items-center justify-center">
-            <button className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 sm:px-6 py-3 rounded-xl text-[14px] font-medium transition-colors">
+            <button
+              onClick={transferApproved}
+              disabled={transferring || counts.approved === 0}
+              className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white px-4 sm:px-6 py-3 rounded-xl text-[14px] font-medium transition-colors"
+            >
               <TransferIcon />
-              <span className="hidden sm:inline">Transfer all Approved</span>
-              <span className="sm:hidden">Transfer Approved</span>
+              <span className="hidden sm:inline">
+                {transferring ? "Transferring…" : `Transfer all Approved (${counts.approved})`}
+              </span>
+              <span className="sm:hidden">
+                {transferring ? "…" : `Transfer (${counts.approved})`}
+              </span>
             </button>
           </div>
         </div>

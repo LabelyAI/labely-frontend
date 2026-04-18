@@ -1,8 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "../lib/auth";
+import { api, DatasetStats } from "../lib/api";
 
 // Icons
 const UploadIcon = () => (
@@ -67,146 +70,202 @@ const navItems = [
   { name: "Annotated", icon: AnnotatedIcon, href: "/annotated" },
 ];
 
-const SidebarContent = ({ pathname, onClose, onOpenUserModal }: { pathname: string; onClose: () => void; onOpenUserModal: () => void }) => (
-  <>
-    {/* Logo */}
-    <div className="flex items-center justify-between px-5 py-5">
-      <Link href="/" className="flex items-center gap-2">
-        <div className="w-8 h-8 bg-gradient-to-br from-orange-400 to-orange-500 rounded-lg flex items-center justify-center">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 16v-4" />
-            <path d="M12 8h.01" />
-          </svg>
-        </div>
-        <span className="font-semibold text-[15px] text-gray-900">LabelyAI</span>
-      </Link>
-      <button 
-        className="lg:hidden p-1 hover:bg-gray-100 rounded"
-        onClick={onClose}
-      >
-        <CloseIcon />
-      </button>
-    </div>
+function initialsOf(firstName?: string, lastName?: string, email?: string): string {
+  if (firstName || lastName) {
+    return `${(firstName || "").charAt(0)}${(lastName || "").charAt(0)}`.toUpperCase() || "?";
+  }
+  if (email) return email.charAt(0).toUpperCase();
+  return "?";
+}
 
-    {/* Navigation */}
-    <nav className="flex-1 px-3 mt-2">
-      {navItems.map((item) => {
-        const isActive = pathname === item.href;
-        return (
-          <Link
-            key={item.name}
-            href={item.href}
-            onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-[14px] font-medium transition-colors ${
-              isActive
-                ? "bg-orange-50 text-orange-500"
-                : "text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            <item.icon />
-            {item.name}
-          </Link>
-        );
-      })}
-    </nav>
+type SidebarBits = {
+  pathname: string;
+  onClose: () => void;
+  onOpenUserModal: () => void;
+  onLogout: () => void;
+  displayName: string;
+  email: string;
+  initials: string;
+  stats: DatasetStats | null;
+};
 
-    {/* Storage Usage */}
-    <div className="px-4 py-4 border-t border-gray-100">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-[12px] text-gray-500">Storage Usage</span>
-        <span className="text-[12px] font-medium text-gray-700">72%</span>
-      </div>
-      <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div className="w-[72%] h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full" />
-      </div>
-      <p className="text-[11px] text-gray-400 mt-1.5">7.2 GB of 10 GB used</p>
-    </div>
+const SidebarContent = ({
+  pathname,
+  onClose,
+  onOpenUserModal,
+  onLogout,
+  displayName,
+  email,
+  initials,
+  stats,
+}: SidebarBits) => {
+  const totalApproved = stats?.approved ?? 0;
+  const totalImages = stats?.totalImages ?? 0;
+  const pct = totalImages === 0 ? 0 : Math.min(100, Math.round((stats?.annotated ?? 0) / totalImages * 100));
 
-    {/* User Profile */}
-    <div className="px-4 py-4 border-t border-gray-100">
-      <button 
-        onClick={onOpenUserModal}
-        className="w-full flex items-center justify-between hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-200 to-orange-300 flex items-center justify-center overflow-hidden">
-            <span className="text-[13px] font-medium text-orange-800">PP</span>
-          </div>
-          <div className="flex flex-col items-start">
-            <span className="text-[13px] font-medium text-gray-800">Priya Patel</span>
-            <span className="text-[11px] text-gray-400">priya@labely.ai</span>
-          </div>
-        </div>
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            // Handle logout
-          }}
-          className="p-1 hover:bg-gray-100 rounded transition-colors"
+  return (
+    <>
+      <div className="flex items-center justify-between px-5 py-5">
+        <Link href="/" className="flex items-center gap-2">
+          <Image src="/logo_final.png" alt="LabelyAI" width={32} height={32} />
+          <span className="font-semibold text-[15px] text-gray-900">LabelyAI</span>
+        </Link>
+        <button
+          className="lg:hidden p-1 hover:bg-gray-100 rounded"
+          onClick={onClose}
         >
-          <LogoutIcon />
+          <CloseIcon />
         </button>
-      </button>
-    </div>
-  </>
-);
+      </div>
+
+      <nav className="flex-1 px-3 mt-2">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              onClick={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-[14px] font-medium transition-colors ${
+                isActive ? "bg-orange-50 text-orange-500" : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <item.icon />
+              {item.name}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="px-4 py-4 border-t border-gray-100">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[12px] text-gray-500">Annotated</span>
+          <span className="text-[12px] font-medium text-gray-700">{pct}%</span>
+        </div>
+        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="text-[11px] text-gray-400 mt-1.5">
+          {stats?.annotated ?? 0} of {totalImages} images · {totalApproved} approved
+        </p>
+      </div>
+
+      <div className="px-4 py-4 border-t border-gray-100">
+        <div className="w-full flex items-center justify-between rounded-lg p-2 -m-2">
+          <button
+            onClick={onOpenUserModal}
+            className="flex items-center gap-3 hover:bg-gray-50 rounded-lg p-1 -m-1 transition-colors flex-1 min-w-0"
+          >
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-200 to-[#4B6878]/30 flex items-center justify-center overflow-hidden flex-shrink-0">
+              <span className="text-[13px] font-medium text-[#4B6878]">{initials}</span>
+            </div>
+            <div className="flex flex-col items-start min-w-0">
+              <span className="text-[13px] font-medium text-gray-800 truncate max-w-[110px]">
+                {displayName}
+              </span>
+              <span className="text-[11px] text-gray-400 truncate max-w-[110px]">{email}</span>
+            </div>
+          </button>
+          <button
+            onClick={onLogout}
+            className="p-1 hover:bg-gray-100 rounded transition-colors"
+            title="Sign out"
+          >
+            <LogoutIcon />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
 
 export default function Sidebar() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [stats, setStats] = useState<DatasetStats | null>(null);
+  const { user, logout } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) {
+      setStats(null);
+      return;
+    }
+    api.dataset
+      .stats()
+      .then((s) => {
+        if (!cancelled) setStats(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user, pathname]);
+
+  const displayName = user ? `${user.firstName} ${user.lastName}`.trim() || user.email : "Guest";
+  const email = user?.email ?? "";
+  const initials = initialsOf(user?.firstName, user?.lastName, user?.email);
 
   return (
     <>
-      {/* Mobile Menu Button */}
-      <button 
+      <button
         className="lg:hidden fixed top-3 left-4 z-50 p-2 bg-white rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors"
         onClick={() => setIsOpen(true)}
       >
         <MenuIcon />
       </button>
 
-      {/* Mobile Overlay */}
       {isOpen && (
-        <div 
+        <div
           className="lg:hidden fixed inset-0 bg-black/50 z-40"
           onClick={() => setIsOpen(false)}
         />
       )}
 
-      {/* Mobile Sidebar */}
-      <aside className={`lg:hidden fixed inset-y-0 left-0 w-[250px] bg-white border-r border-gray-100 flex flex-col z-50 transform transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <SidebarContent 
-          pathname={pathname} 
-          onClose={() => setIsOpen(false)} 
-          onOpenUserModal={() => setIsUserModalOpen(true)} 
+      <aside
+        className={`lg:hidden fixed inset-y-0 left-0 w-[250px] bg-white border-r border-gray-100 flex flex-col z-50 transform transition-transform duration-300 ${
+          isOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <SidebarContent
+          pathname={pathname}
+          onClose={() => setIsOpen(false)}
+          onOpenUserModal={() => setIsUserModalOpen(true)}
+          onLogout={logout}
+          displayName={displayName}
+          email={email}
+          initials={initials}
+          stats={stats}
         />
       </aside>
 
-      {/* Desktop Sidebar */}
       <aside className="hidden lg:flex w-[200px] bg-white border-r border-gray-100 flex-col fixed h-full">
-        <SidebarContent 
-          pathname={pathname} 
-          onClose={() => {}} 
-          onOpenUserModal={() => setIsUserModalOpen(true)} 
+        <SidebarContent
+          pathname={pathname}
+          onClose={() => {}}
+          onOpenUserModal={() => setIsUserModalOpen(true)}
+          onLogout={logout}
+          displayName={displayName}
+          email={email}
+          initials={initials}
+          stats={stats}
         />
       </aside>
 
-      {/* User Modal */}
-      {isUserModalOpen && (
+      {isUserModalOpen && user && (
         <>
-          {/* Backdrop */}
-          <div 
+          <div
             className="fixed inset-0 bg-black/50 z-[60]"
             onClick={() => setIsUserModalOpen(false)}
           />
 
-          {/* Modal */}
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-white rounded-2xl shadow-2xl z-[70] overflow-hidden">
-            {/* Header */}
-            <div className="bg-gradient-to-br from-orange-500 to-amber-500 px-6 py-5 text-white relative">
-              <button 
+            <div className="bg-gradient-to-br from-[#F97316] to-[#4B6878] px-6 py-5 text-white relative">
+              <button
                 onClick={() => setIsUserModalOpen(false)}
                 className="absolute top-3 right-3 p-1 hover:bg-white/20 rounded-lg transition-colors"
               >
@@ -214,74 +273,58 @@ export default function Sidebar() {
               </button>
               <div className="flex items-center gap-3">
                 <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border-2 border-white/30">
-                  <span className="text-[20px] font-bold text-white">PP</span>
+                  <span className="text-[20px] font-bold text-white">{initials}</span>
                 </div>
                 <div>
-                  <h2 className="text-[18px] font-bold">Priya Patel</h2>
-                  <p className="text-orange-100 text-[13px]">@priya_patel</p>
+                  <h2 className="text-[18px] font-bold">{displayName}</h2>
+                  <p className="text-white/75 text-[13px]">{email}</p>
                 </div>
               </div>
             </div>
 
-            {/* Content */}
             <div className="p-5 space-y-4">
-              {/* Subscription Type */}
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-3 border border-purple-100">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-medium text-purple-600 uppercase tracking-wide">Subscription</span>
-                  <span className="px-2 py-0.5 bg-purple-600 text-white text-[10px] font-bold rounded-full">PRO</span>
-                </div>
-                <p className="text-[16px] font-bold text-gray-800">Professional Plan</p>
-                <p className="text-[11px] text-gray-500 mt-0.5">Renews on March 15, 2026</p>
-              </div>
-
-              {/* Credits */}
               <div className="bg-orange-50 rounded-xl p-3 border border-orange-100">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-medium text-orange-600 uppercase tracking-wide">Credits Available</span>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#F97316" stroke="#F97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
+                  <span className="text-[11px] font-medium text-orange-600 uppercase tracking-wide">Dataset</span>
                 </div>
-                <p className="text-[24px] font-bold text-gray-800">2,400</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-orange-100 rounded-full overflow-hidden">
-                    <div className="w-[60%] h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full" />
-                  </div>
-                  <span className="text-[10px] text-gray-500">60%</span>
-                </div>
-                <p className="text-[10px] text-gray-500 mt-1">of 4,000 monthly credits</p>
+                <p className="text-[24px] font-bold text-gray-800">{stats?.totalImages ?? 0}</p>
+                <p className="text-[11px] text-gray-500 mt-1">total images uploaded</p>
               </div>
 
-              {/* User Info */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-[11px] text-gray-500">Pending</p>
+                  <p className="text-[18px] font-bold text-gray-700">{stats?.pending ?? 0}</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-3 text-center">
+                  <p className="text-[11px] text-green-600">Approved</p>
+                  <p className="text-[18px] font-bold text-green-700">{stats?.approved ?? 0}</p>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 text-center">
+                  <p className="text-[11px] text-red-500">Rejected</p>
+                  <p className="text-[18px] font-bold text-red-600">{stats?.rejected ?? 0}</p>
+                </div>
+              </div>
+
               <div className="space-y-2.5">
                 <div>
                   <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Email Address</label>
-                  <p className="text-[13px] text-gray-800 mt-0.5">priya@labely.ai</p>
+                  <p className="text-[13px] text-gray-800 mt-0.5">{email}</p>
                 </div>
                 <div>
-                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Username</label>
-                  <p className="text-[13px] text-gray-800 mt-0.5">@priya_patel</p>
-                </div>
-                <div>
-                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Member Since</label>
-                  <p className="text-[13px] text-gray-800 mt-0.5">January 12, 2026</p>
-                </div>
-                <div>
-                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Total Annotations</label>
-                  <p className="text-[13px] text-gray-800 mt-0.5">12,458 images annotated</p>
+                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Name</label>
+                  <p className="text-[13px] text-gray-800 mt-0.5">{displayName}</p>
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="pt-3 space-y-2">
-                <button className="w-full py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-[13px] font-medium transition-colors">
-                  Manage Subscription
-                </button>
-                <button className="w-full py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-[13px] font-medium transition-colors">
-                  Account Settings
-                </button>
-                <button className="w-full py-2 text-red-600 hover:bg-red-50 rounded-lg text-[13px] font-medium transition-colors flex items-center justify-center gap-2">
+                <button
+                  onClick={() => {
+                    setIsUserModalOpen(false);
+                    logout();
+                  }}
+                  className="w-full py-2 text-red-600 hover:bg-red-50 rounded-lg text-[13px] font-medium transition-colors flex items-center justify-center gap-2"
+                >
                   <LogoutIcon />
                   Sign Out
                 </button>
