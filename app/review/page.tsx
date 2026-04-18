@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import { api, AnnotationResponse, AnnotationStatus } from "../lib/api";
@@ -81,6 +81,132 @@ const statusLabels: Record<AnnotationStatus, string> = {
   REJECTED: "Rejected",
 };
 
+type Box = { x1: number; y1: number; x2: number; y2: number };
+
+function ManualAnnotateModal({ annotation, onSave, onClose }: {
+  annotation: AnnotationResponse;
+  onSave: (updated: AnnotationResponse) => void;
+  onClose: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const drawingRef = useRef(false);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const [boxes, setBoxes] = useState<Box[]>([]);
+  const [current, setCurrent] = useState<Box | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toPercent = (e: React.MouseEvent) => {
+    const rect = containerRef.current!.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const p = toPercent(e);
+    startRef.current = p;
+    drawingRef.current = true;
+    setCurrent({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!drawingRef.current || !startRef.current) return;
+    const p = toPercent(e);
+    const s = startRef.current;
+    setCurrent({ x1: Math.min(s.x, p.x), y1: Math.min(s.y, p.y), x2: Math.max(s.x, p.x), y2: Math.max(s.y, p.y) });
+  };
+
+  const onMouseUp = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    startRef.current = null;
+    setCurrent((cur) => {
+      if (cur && (cur.x2 - cur.x1) > 0.005 && (cur.y2 - cur.y1) > 0.005) {
+        setBoxes((prev) => [...prev, cur]);
+      }
+      return null;
+    });
+  };
+
+  const save = async () => {
+    if (boxes.length === 0) { setError("Draw at least one box."); return; }
+    const img = imgRef.current!;
+    const w = img.naturalWidth || annotation.imageWidth || 1;
+    const h = img.naturalHeight || annotation.imageHeight || 1;
+    const scaled = boxes.map((b) => ({
+      x1: Math.round(b.x1 * w), y1: Math.round(b.y1 * h),
+      x2: Math.round(b.x2 * w), y2: Math.round(b.y2 * h),
+    }));
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.annotations.saveManual(annotation.id, scaled, annotation.prompt);
+      onSave(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-[15px] font-semibold text-gray-900">Manual Annotation</h2>
+            <p className="text-[12px] text-gray-400 mt-0.5">Drag to draw bounding boxes on the original image</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          <div
+            ref={containerRef}
+            className="relative select-none cursor-crosshair"
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+          >
+            <img ref={imgRef} src={annotation.imageUrl} alt={annotation.imageFileName} className="w-full rounded-lg block" draggable={false} />
+            {boxes.map((box, i) => (
+              <div key={i} style={{ position: "absolute", left: `${box.x1 * 100}%`, top: `${box.y1 * 100}%`, width: `${(box.x2 - box.x1) * 100}%`, height: `${(box.y2 - box.y1) * 100}%`, border: "2px solid #F97316", boxSizing: "border-box" }}>
+                <button
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={() => setBoxes((prev) => prev.filter((_, j) => j !== i))}
+                  className="absolute -top-3 -right-3 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center leading-none hover:bg-red-600"
+                >×</button>
+              </div>
+            ))}
+            {current && (
+              <div style={{ position: "absolute", left: `${current.x1 * 100}%`, top: `${current.y1 * 100}%`, width: `${(current.x2 - current.x1) * 100}%`, height: `${(current.y2 - current.y1) * 100}%`, border: "2px dashed #F97316", boxSizing: "border-box", pointerEvents: "none" }} />
+            )}
+          </div>
+        </div>
+
+        {error && <p className="px-5 text-[12px] text-red-500">{error}</p>}
+
+        <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100">
+          <span className="text-[12px] text-gray-400">{boxes.length} box{boxes.length !== 1 ? "es" : ""} drawn</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-[13px] text-gray-600 hover:bg-gray-50 border border-gray-200 rounded-lg">Cancel</button>
+            <button onClick={save} disabled={saving || boxes.length === 0} className="px-4 py-2 text-[13px] bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white rounded-lg font-medium">
+              {saving ? "Saving…" : "Save Annotations"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewPage() {
   const { user, loading: authLoading } = useRequireAuth();
   const [annotations, setAnnotations] = useState<AnnotationResponse[]>([]);
@@ -91,6 +217,7 @@ export default function ReviewPage() {
   const [showImageList, setShowImageList] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [updating, setUpdating] = useState(false);
+  const [manualAnnotating, setManualAnnotating] = useState<AnnotationResponse | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -99,7 +226,7 @@ export default function ReviewPage() {
     setError(null);
     try {
       const list = await api.annotations.list();
-      setAnnotations(list);
+      setAnnotations(list.filter((a) => !a.transferred));
       if (list.length > 0 && selectedId == null) setSelectedId(list[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load annotations");
@@ -110,6 +237,16 @@ export default function ReviewPage() {
 
   useEffect(() => {
     if (user) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Re-fetch when page becomes visible again (handles Next.js router cache restoring stale state)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && user) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -142,7 +279,13 @@ export default function ReviewPage() {
     setError(null);
     try {
       const updated = await api.annotations.review(selected.id, decision);
-      setAnnotations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      setAnnotations((prev) => {
+        const next = prev.map((a) => (a.id === updated.id ? updated : a));
+        const currentIndex = filtered.findIndex((a) => a.id === selected.id);
+        const nextAnnotation = filtered[currentIndex + 1];
+        if (nextAnnotation) setSelectedId(nextAnnotation.id);
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Review failed");
     } finally {
@@ -186,13 +329,13 @@ export default function ReviewPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#FAFAFA] font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#FAFAFA] font-sans">
       <Sidebar />
 
-      <main className="flex-1 lg:ml-[200px] flex flex-col">
+      <main className="flex-1 lg:ml-[200px] flex flex-col overflow-hidden">
         <Header />
 
-        <div className="flex-1 p-4 sm:p-6 flex flex-col">
+        <div className="flex-1 p-4 sm:p-6 flex flex-col min-h-0 overflow-hidden">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900">Annotation Review</h1>
             <button
@@ -214,7 +357,7 @@ export default function ReviewPage() {
             </div>
           )}
 
-          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6">
+          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
             <div className={`${showImageList ? "block" : "hidden"} lg:block w-full lg:w-[300px] xl:w-[340px] flex flex-col`}>
               <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-2 lg:pb-0">
                 {(
@@ -356,11 +499,38 @@ export default function ReviewPage() {
                   <p className="relative z-10 text-gray-300 text-[14px]">Select an annotation to preview</p>
                 ) : (
                   <div className="relative z-10 p-4" style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}>
-                    <img
-                      src={selected.overlayUrl ?? selected.imageUrl}
-                      alt={selected.imageFileName}
-                      className="max-w-full max-h-[200px] sm:max-h-[400px] lg:max-h-[560px] object-contain rounded-lg"
-                    />
+                    <div
+                      className="relative rounded-lg overflow-hidden"
+                      style={selected.imageWidth && selected.imageHeight ? { aspectRatio: `${selected.imageWidth}/${selected.imageHeight}`, maxHeight: "560px", width: "100%" } : {}}
+                    >
+                      <img
+                        src={selected.imageUrl}
+                        alt={selected.imageFileName}
+                        className="w-full h-full object-contain rounded-lg block"
+                      />
+                      {selected.imageWidth && selected.imageHeight && selected.detections && selected.detections.length > 0 && (
+                        <svg
+                          viewBox={`0 0 ${selected.imageWidth} ${selected.imageHeight}`}
+                          className="absolute inset-0 w-full h-full"
+                          style={{ pointerEvents: "none" }}
+                        >
+                          {selected.detections.map((det, i) => {
+                            const labelText = `${det.label} ${Math.round(det.score * 100)}%`;
+                            const charW = 7;
+                            const labelW = labelText.length * charW + 8;
+                            const labelH = 18;
+                            const labelY = det.y1 - labelH < 0 ? det.y1 : det.y1 - labelH;
+                            return (
+                              <g key={i}>
+                                <rect x={det.x1} y={det.y1} width={det.x2 - det.x1} height={det.y2 - det.y1} fill="rgba(249,115,22,0.15)" stroke="#F97316" strokeWidth="2" />
+                                <rect x={det.x1} y={labelY} width={labelW} height={labelH} fill="#F97316" />
+                                <text x={det.x1 + 4} y={labelY + 13} fill="white" fontSize="11" fontFamily="sans-serif" fontWeight="600">{labelText}</text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -382,6 +552,15 @@ export default function ReviewPage() {
                   <XIcon />
                   <span className="hidden sm:inline">Reject</span>
                 </button>
+                {selected?.status === "REJECTED" && (
+                  <button
+                    onClick={() => setManualAnnotating(selected)}
+                    className="flex items-center gap-2 px-4 sm:px-6 py-2.5 border-2 border-orange-400 text-orange-500 rounded-lg text-[14px] font-medium hover:bg-orange-50 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    <span className="hidden sm:inline">Annotate Manually</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -405,6 +584,17 @@ export default function ReviewPage() {
           </div>
         </div>
       </main>
+
+      {manualAnnotating && (
+        <ManualAnnotateModal
+          annotation={manualAnnotating}
+          onSave={(updated) => {
+            setAnnotations((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+            setManualAnnotating(null);
+          }}
+          onClose={() => setManualAnnotating(null)}
+        />
+      )}
     </div>
   );
 }

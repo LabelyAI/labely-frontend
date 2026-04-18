@@ -77,6 +77,18 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const openFolderPicker = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.setAttribute("webkitdirectory", "");
+    input.onchange = (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files) handleFiles(files);
+    };
+    input.click();
+  };
+
   const fetchStats = async () => {
     try {
       const s = await api.dataset.stats();
@@ -193,6 +205,7 @@ export default function UploadPage() {
               onChange={onSelect}
               className="hidden"
             />
+
             <div className="w-14 h-14 bg-orange-100 rounded-full flex items-center justify-center mb-4">
               <CloudUploadIcon />
             </div>
@@ -202,16 +215,28 @@ export default function UploadPage() {
             <p className="text-[12px] sm:text-[13px] text-gray-400 mb-4 text-center">
               SVG, PNG, JPG or GIF (max. 50MB each)
             </p>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                inputRef.current?.click();
-              }}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-[13px] font-medium transition-colors"
-            >
-              Select Files
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  inputRef.current?.click();
+                }}
+                className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-lg text-[13px] font-medium transition-colors"
+              >
+                Select Files
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFolderPicker();
+                }}
+                className="bg-white hover:bg-orange-50 text-orange-500 border border-orange-400 px-5 py-2 rounded-lg text-[13px] font-medium transition-colors"
+              >
+                Select Folder
+              </button>
+            </div>
           </div>
 
           {tasks.length > 0 && (

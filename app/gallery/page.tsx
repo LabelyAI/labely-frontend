@@ -56,6 +56,7 @@ export default function GalleryPage() {
   const [mode, setMode] = useState(models[0].id);
   const [modelOpen, setModelOpen] = useState(false);
   const [annotating, setAnnotating] = useState(false);
+  const [annotationProgress, setAnnotationProgress] = useState<{ done: number; total: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = async () => {
@@ -106,18 +107,33 @@ export default function GalleryPage() {
       setError("Enter a prompt (e.g. car, person, dog)");
       return;
     }
+    const ids = Array.from(selected);
     setAnnotating(true);
+    setAnnotationProgress({ done: 0, total: ids.length });
     setError(null);
+    let successCount = 0;
+    let failCount = 0;
     try {
-      const res = await api.annotations.run(Array.from(selected), prompt.trim(), { mode });
-      setToast(`Annotated ${res.length} image${res.length === 1 ? "" : "s"}. Go to Review.`);
-      setSelected(new Set());
-      await load();
-      setTimeout(() => router.push("/review"), 800);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Annotation failed");
+      for (let i = 0; i < ids.length; i++) {
+        try {
+          const results = await api.annotations.run([ids[i]], prompt.trim(), { mode });
+          if (results && results.length > 0) successCount++;
+          else failCount++;
+        } catch {
+          failCount++;
+        }
+        setAnnotationProgress({ done: i + 1, total: ids.length });
+      }
+      if (failCount > 0) setError(`${failCount} image${failCount === 1 ? "" : "s"} failed to annotate.`);
+      if (successCount > 0) {
+        setToast(`Annotated ${successCount} image${successCount === 1 ? "" : "s"}. Go to Review.`);
+        setSelected(new Set());
+        await load();
+        setTimeout(() => router.push("/review"), 800);
+      }
     } finally {
       setAnnotating(false);
+      setAnnotationProgress(null);
     }
   };
 
@@ -145,6 +161,20 @@ export default function GalleryPage() {
                   {selected.size} Selected
                 </span>
               </div>
+              <div className="w-px h-5 bg-gray-200" />
+              <button
+                onClick={() => {
+                  if (selected.size === images.length) {
+                    setSelected(new Set());
+                  } else {
+                    setSelected(new Set(images.map((i) => i.id)));
+                  }
+                }}
+                disabled={images.length === 0}
+                className="text-[14px] font-medium text-orange-500 hover:text-orange-600 transition-colors disabled:opacity-40"
+              >
+                {selected.size === images.length && images.length > 0 ? "Deselect All" : "Select All"}
+              </button>
               <div className="w-px h-5 bg-gray-200" />
               <button
                 onClick={deleteSelected}
@@ -226,6 +256,23 @@ export default function GalleryPage() {
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 sm:px-6 py-4">
+          {annotationProgress && (
+            <div className="max-w-[1000px] mx-auto mb-3">
+              <div className="flex justify-between text-[12px] text-gray-500 mb-1.5">
+                <span>Annotating images…</span>
+                <span>{annotationProgress.done} / {annotationProgress.total}</span>
+              </div>
+              <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.round((annotationProgress.done / annotationProgress.total) * 100)}%`,
+                    background: `linear-gradient(to right, #F97316, #3B82F6)`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 max-w-[1000px] mx-auto">
             <div className="flex-1 relative">
               <input
