@@ -1,6 +1,6 @@
 const RAW_BASE =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) ||
-  "http://localhost:8080";
+  "http://localhost:8081";
 
 export const API_BASE = RAW_BASE.replace(/\/$/, "");
 
@@ -236,6 +236,12 @@ export const api = {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision }),
+      }),
+    saveManual: (id: number, boxes: { x1: number; y1: number; x2: number; y2: number }[], label: string) =>
+      request<AnnotationResponse>(`/api/annotations/${id}/manual`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boxes, label }),
       }),
     remove: (id: number) =>
       request<{ status: string }>(`/api/annotations/${id}`, { method: "DELETE" }),
