@@ -48,6 +48,12 @@ export function setStoredUser(user: StoredUser) {
 async function handleResponse<T>(res: Response): Promise<T> {
   const contentType = res.headers.get("content-type") ?? "";
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      clearToken();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.replace("/login");
+      }
+    }
     let message = `Request failed (${res.status})`;
     try {
       if (contentType.includes("application/json")) {
@@ -211,7 +217,13 @@ export const api = {
     run: (
       imageIds: number[],
       prompt: string,
-      opts?: { mode?: string; confThreshold?: number; largestComponent?: boolean; returnImages?: boolean },
+      opts?: {
+        mode?: string;
+        confThreshold?: number;
+        largestComponent?: boolean;
+        returnImages?: boolean;
+        defectxProjectId?: string;
+      },
     ) =>
       request<AnnotationResponse[]>("/api/annotations/run", {
         method: "POST",
@@ -223,6 +235,7 @@ export const api = {
           confThreshold: opts?.confThreshold,
           largestComponent: opts?.largestComponent,
           returnImages: opts?.returnImages ?? true,
+          defectxProjectId: opts?.defectxProjectId,
         }),
       }),
     list: (status?: AnnotationStatus) => {
@@ -269,5 +282,25 @@ export const api = {
   },
   sam3: {
     health: () => request<{ reachable: boolean; body: string }>("/api/sam3/health", {}, false),
+  },
+  defectx: {
+    health: () => request<{ reachable: boolean; body?: string }>("/api/defectx/health", {}, false),
+    setReference: (imageIds: number[], opts?: { projectId?: string; prompt?: string }) =>
+      request<{ project_id: string; num_refs: number; prompt: string | null }>(
+        "/api/defectx/reference",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageIds,
+            projectId: opts?.projectId,
+            prompt: opts?.prompt,
+          }),
+        },
+      ),
+    deleteReference: (projectId: string) =>
+      request<{ deleted: boolean; projectId: string }>(`/api/defectx/reference/${projectId}`, {
+        method: "DELETE",
+      }),
   },
 };
