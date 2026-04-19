@@ -58,6 +58,62 @@ export default function GalleryPage() {
   const [annotating, setAnnotating] = useState(false);
   const [annotationProgress, setAnnotationProgress] = useState<{ done: number; total: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [defectxProjectId, setDefectxProjectId] = useState<string | null>(null);
+  const [defectxRefCount, setDefectxRefCount] = useState<number>(0);
+  const [settingBaseline, setSettingBaseline] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const pid = localStorage.getItem("labely.defectx.projectId");
+    const cnt = localStorage.getItem("labely.defectx.refCount");
+    if (pid) setDefectxProjectId(pid);
+    if (cnt) setDefectxRefCount(parseInt(cnt, 10) || 0);
+  }, []);
+
+  const persistBaseline = (pid: string | null, count: number) => {
+    if (typeof window === "undefined") return;
+    if (pid) {
+      localStorage.setItem("labely.defectx.projectId", pid);
+      localStorage.setItem("labely.defectx.refCount", String(count));
+    } else {
+      localStorage.removeItem("labely.defectx.projectId");
+      localStorage.removeItem("labely.defectx.refCount");
+    }
+  };
+
+  const setDefectXBaseline = async () => {
+    if (selected.size === 0) {
+      setError("Select at least one baseline image first");
+      return;
+    }
+    setSettingBaseline(true);
+    setError(null);
+    try {
+      const resp = await api.defectx.setReference(Array.from(selected), {
+        projectId: defectxProjectId ?? undefined,
+        prompt: prompt.trim() || undefined,
+      });
+      setDefectxProjectId(resp.project_id);
+      setDefectxRefCount(resp.num_refs);
+      persistBaseline(resp.project_id, resp.num_refs);
+      setToast(`Baseline registered (${resp.num_refs} image${resp.num_refs === 1 ? "" : "s"}). Select test images to inspect.`);
+      setSelected(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set baseline");
+    } finally {
+      setSettingBaseline(false);
+    }
+  };
+
+  const clearDefectXBaseline = async () => {
+    if (!defectxProjectId) return;
+    try {
+      await api.defectx.deleteReference(defectxProjectId);
+    } catch { /* best-effort */ }
+    setDefectxProjectId(null);
+    setDefectxRefCount(0);
+    persistBaseline(null, 0);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -103,7 +159,12 @@ export default function GalleryPage() {
       setError("Select at least one image first");
       return;
     }
-    if (!prompt.trim()) {
+    if (mode === "defectx") {
+      if (!defectxProjectId) {
+        setError("Set a DefectX baseline first (select baseline images and press 'Set Baseline').");
+        return;
+      }
+    } else if (!prompt.trim()) {
       setError("Enter a prompt (e.g. car, person, dog)");
       return;
     }
@@ -116,7 +177,10 @@ export default function GalleryPage() {
     try {
       for (let i = 0; i < ids.length; i++) {
         try {
-          const results = await api.annotations.run([ids[i]], prompt.trim(), { mode });
+          const results = await api.annotations.run([ids[i]], prompt.trim(), {
+            mode,
+            defectxProjectId: mode === "defectx" ? defectxProjectId ?? undefined : undefined,
+          });
           if (results && results.length > 0) successCount++;
           else failCount++;
         } catch {
@@ -255,6 +319,41 @@ export default function GalleryPage() {
           )}
         </div>
 
+        {mode === "defectx" && (
+          <div className="px-4 sm:px-6 pb-3">
+            <div className="max-w-[1000px] mx-auto rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-[13px] text-gray-700">
+                <span className="font-semibold text-orange-600">DefectX baseline:</span>{" "}
+                {defectxProjectId ? (
+                  <>
+                    <span className="font-mono text-[12px] text-gray-600">{defectxProjectId}</span>{" "}
+                    <span className="text-gray-500">— {defectxRefCount} reference image{defectxRefCount === 1 ? "" : "s"}</span>
+                  </>
+                ) : (
+                  <span className="text-gray-500">No baseline registered. Select defect-free images and press “Set Baseline”.</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={setDefectXBaseline}
+                  disabled={settingBaseline || selected.size === 0}
+                  className="px-3 py-2 rounded-lg text-[12px] font-medium bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white transition-colors"
+                >
+                  {settingBaseline ? "Setting…" : defectxProjectId ? "Replace Baseline" : "Set Baseline"}
+                </button>
+                {defectxProjectId && (
+                  <button
+                    onClick={clearDefectXBaseline}
+                    className="px-3 py-2 rounded-lg text-[12px] font-medium bg-white border border-gray-200 hover:border-gray-300 text-gray-600 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 sm:px-6 py-4">
           {annotationProgress && (
             <div className="max-w-[1000px] mx-auto mb-3">
@@ -279,7 +378,11 @@ export default function GalleryPage() {
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe objects to annotate (e.g. car, person, dog)…"
+                placeholder={
+                  mode === "defectx"
+                    ? "Object to inspect (optional, e.g. bottle, pcb)…"
+                    : "Describe objects to annotate (e.g. car, person, dog)…"
+                }
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 transition-all"
               />
             </div>
