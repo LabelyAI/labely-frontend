@@ -174,6 +174,7 @@ export default function GalleryPage() {
     setError(null);
     let successCount = 0;
     let failCount = 0;
+    const failReasons: string[] = [];
     try {
       for (let i = 0; i < ids.length; i++) {
         try {
@@ -183,12 +184,17 @@ export default function GalleryPage() {
           });
           if (results && results.length > 0) successCount++;
           else failCount++;
-        } catch {
+        } catch (e) {
           failCount++;
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!failReasons.includes(msg)) failReasons.push(msg);
         }
         setAnnotationProgress({ done: i + 1, total: ids.length });
       }
-      if (failCount > 0) setError(`${failCount} image${failCount === 1 ? "" : "s"} failed to annotate.`);
+      if (failCount > 0) {
+        const reason = failReasons.length > 0 ? ` — ${failReasons[0]}` : "";
+        setError(`${failCount} image${failCount === 1 ? "" : "s"} failed to annotate${reason}.`);
+      }
       if (successCount > 0) {
         setToast(`Annotated ${successCount} image${successCount === 1 ? "" : "s"}. Go to Review.`);
         setSelected(new Set());
