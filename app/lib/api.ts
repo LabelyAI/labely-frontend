@@ -1,6 +1,6 @@
 const RAW_BASE =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) ||
-  "http://localhost:8081";
+  "https://labely-backend.kodrum.dev";
 
 export const API_BASE = RAW_BASE.replace(/\/$/, "");
 
